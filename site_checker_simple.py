@@ -38,7 +38,7 @@ class SiteChecker:
                 down_sites.append(site)
 
         if not down_sites:
-            return  # Ничего не отправляем, если все сайты работают
+            return
 
         text = f"❌ Обнаружены недоступные сайты ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')}):\n"
         text += "\n".join(down_sites)
@@ -60,7 +60,18 @@ class SiteChecker:
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_chat.id
         active_users.add(user_id)
-        await context.bot.send_message(chat_id=user_id, text="✅ Вы подписались на автоматическую проверку. Буду присылать уведомления каждый час, если какой-то сайт упал.")
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="✅ Вы подписались на автоматическую проверку. Отправлю сообщение, если какой-то сайт перестанет работать. Чтобы отписаться, напишите /stop"
+        )
+
+    async def stop_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_chat.id
+        if user_id in active_users:
+            active_users.remove(user_id)
+            await context.bot.send_message(chat_id=user_id, text="🛑 Вы отписались от автоматических уведомлений.")
+        else:
+            await context.bot.send_message(chat_id=user_id, text="ℹ️ Вы не были подписаны.")
 
 async def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
@@ -68,6 +79,7 @@ async def main():
 
     app.add_handler(CommandHandler("start", checker.start_command))
     app.add_handler(CommandHandler("check", checker.manual_check))
+    app.add_handler(CommandHandler("stop", checker.stop_command))
 
     app.job_queue.run_repeating(checker.auto_check, interval=3600, first=10)
 
