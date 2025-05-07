@@ -5,8 +5,8 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 
 # Конфигурация (должна быть выше)
 DEFAULT_CONFIG = {
-    'BOT_TOKEN': 'your_bot_token',  # Замените на ваш токен
-    'CHAT_ID': 'your_chat_id'       # Замените на ваш chat_id
+    'BOT_TOKEN': '8158547630:AAHXI6vOyekQ__paWkxPMMIzs-ho7A71LUs',  # Замените на ваш токен
+    'CHAT_ID': '5273385466'       # Замените на ваш chat_id
 }
 
 class SiteChecker:
