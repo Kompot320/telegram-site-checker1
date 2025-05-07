@@ -7,7 +7,7 @@ import nest_asyncio
 
 nest_asyncio.apply()
 
-BOT_TOKEN = "ТВОЙ_ТОКЕН_СЮДА"  # ← замени на свой токен
+BOT_TOKEN = "8158547630:AAHXI6vOyekQ__paWkxPMMIzs-ho7A71LUs"  # ← замени на свой токен
 
 active_users = set()
 
