@@ -5,8 +5,8 @@ from datetime import datetime, timedelta
 from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackContext, JobQueue
 
-# Токен из переменной окружения
-TOKEN = os.environ.get('8191040502:AAHLup7zN6FoUfswuO43VT6wI3I1Yyy_wm0')
+# Получаем токен из переменной окружения
+TOKEN = os.getenv('8191040502:AAHLup7zN6FoUfswuO43VT6wI3I1Yyy_wm0')  # Убедитесь, что переменная окружения установлена
 
 # Настройка логирования
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -58,7 +58,7 @@ async def stop(update: Update, context: CallbackContext) -> None:
     await update.message.reply_text("Остановка проверки сайта...")
 
 # Функция, которая будет выполняться каждый час
-async def hourly_check(context: CallbackContext):
+async def hourly_check(context: CallbackContext) -> None:
     down_sites = check_sites()
     if down_sites:
         for user_id in active_users:
@@ -85,8 +85,8 @@ async def main() -> None:
     # Следующий момент начала часа
     next_hour = (now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
 
-    # Запуск задачи в следующий час
-    job_queue.run_once(hourly_check, next_hour)
+    # Запуск задачи в следующий час и каждый час после этого
+    job_queue.run_repeating(hourly_check, interval=3600, first=next_hour)
 
     # Запуск бота
     await application.run_polling()
