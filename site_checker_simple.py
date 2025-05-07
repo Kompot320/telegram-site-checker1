@@ -1,18 +1,17 @@
-import requests
 import asyncio
 from datetime import datetime
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes, JobQueue, ApplicationBuilder
-import nest_asyncio
+from telegram import Update, BotCommand
+from telegram.ext import Application, CommandHandler, ContextTypes
 
-nest_asyncio.apply()
-
-BOT_TOKEN = "8158547630:AAHXI6vOyekQ__paWkxPMMIzs-ho7A71LUs"  # ← замени на свой токен
-
-active_users = set()
+# Конфигурация (должна быть выше)
+DEFAULT_CONFIG = {
+    'BOT_TOKEN': 'your_bot_token',  # Замените на ваш токен
+    'CHAT_ID': 'your_chat_id'       # Замените на ваш chat_id
+}
 
 class SiteChecker:
-    def __init__(self):
+    def __init__(self, config):
+        self.config = config
         self.sites = self.load_sites()
 
     def load_sites(self):
@@ -20,6 +19,7 @@ class SiteChecker:
             with open('sites_list.txt', 'r') as f:
                 return [line.strip() for line in f if line.strip()]
         except FileNotFoundError:
+            print("⚠️ Файл sites_list.txt не найден!")
             return []
 
     def check_site(self, url):
@@ -31,76 +31,61 @@ class SiteChecker:
         except:
             return False
 
-    async def auto_check(self, context: ContextTypes.DEFAULT_TYPE):
-        down_sites = []
-        for site in self.sites:
-            if not self.check_site(site):
-                down_sites.append(site)
-
-        if not down_sites:
+    async def send_report(self, context: ContextTypes.DEFAULT_TYPE):
+        if not self.sites:
+            await context.bot.send_message(
+                chat_id=self.config['CHAT_ID'],
+                text="⚠️ Список сайтов пуст!"
+            )
             return
 
-        text = f"❌ Обнаружены недоступные сайты ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')}):\n"
-        text += "\n".join(down_sites)
-
-        for user_id in active_users:
-            try:
-                await context.bot.send_message(chat_id=user_id, text=text)
-            except Exception as e:
-                print(f"Ошибка отправки {user_id}: {e}")
-
-    async def manual_check(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        report = [f"🔍 Ручная проверка сайтов ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')}):"]
+        report = [f"🔍 Проверка сайтов {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}:"]
         for site in self.sites:
             status = "✅ Доступен" if self.check_site(site) else "❌ Не доступен"
             report.append(f"{site}: {status}")
 
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="\n".join(report))
-
-    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_id = update.effective_chat.id
-        active_users.add(user_id)
         await context.bot.send_message(
-            chat_id=user_id,
-            text="✅ Вы подписались на автоматическую проверку. Отправлю сообщение, если какой-то сайт перестанет работать. Чтобы отписаться, напишите /stop"
+            chat_id=self.config['CHAT_ID'],
+            text="\n".join(report)
         )
 
-    async def stop_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_id = update.effective_chat.id
-        if user_id in active_users:
-            active_users.remove(user_id)
-            await context.bot.send_message(chat_id=user_id, text="🛑 Вы отписались от автоматических уведомлений.")
-        else:
-            await context.bot.send_message(chat_id=user_id, text="ℹ️ Вы не были подписаны.")
+    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="🟢 Запускаю проверку сайтов..."
+        )
+        await self.send_report(context)
+
+    async def manual_check(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await self.send_report(context)
+
+    async def auto_check(self, context: ContextTypes.DEFAULT_TYPE):
+        await self.send_report(context)
 
 async def main():
     checker = SiteChecker(DEFAULT_CONFIG)
-    
+
     app = Application.builder().token(DEFAULT_CONFIG['BOT_TOKEN']).build()
 
-    # Устанавливаем кнопки-команды в Telegram
+    # Устанавливаем команды в меню бота
     await app.bot.set_my_commands([
         BotCommand("start", "Запустить бота"),
         BotCommand("check", "Проверить сайты вручную"),
         BotCommand("stop", "Остановить авто-проверку")
-
     ])
 
     app.add_handler(CommandHandler("start", checker.start))
-    app.add_handler(CommandHandler("check", checker.manual_check))  # если у тебя реализована ручная проверка
+    app.add_handler(CommandHandler("check", checker.manual_check))  # ручная проверка
+    app.add_handler(CommandHandler("stop", checker.auto_check))  # для остановки, если нужно, надо будет дописать логику
 
+    # Запускаем авто-проверку
     app.job_queue.run_repeating(checker.auto_check, interval=3600, first=10)
 
     print("🤖 Бот запущен.")
     await app.run_polling()
 
-
 if __name__ == "__main__":
     import nest_asyncio
-    import asyncio
-
     nest_asyncio.apply()
-    loop = asyncio.get_event_loop()
-    loop.create_task(main())
-    loop.run_forever()
 
+    asyncio.run(main())
