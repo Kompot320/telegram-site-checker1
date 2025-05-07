@@ -74,17 +74,26 @@ class SiteChecker:
             await context.bot.send_message(chat_id=user_id, text="ℹ️ Вы не были подписаны.")
 
 async def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    checker = SiteChecker()
+    checker = SiteChecker(DEFAULT_CONFIG)
+    
+    app = Application.builder().token(DEFAULT_CONFIG['BOT_TOKEN']).build()
 
-    app.add_handler(CommandHandler("start", checker.start_command))
-    app.add_handler(CommandHandler("check", checker.manual_check))
-    app.add_handler(CommandHandler("stop", checker.stop_command))
+    # Устанавливаем кнопки-команды в Telegram
+    await app.bot.set_my_commands([
+        BotCommand("start", "Запустить бота"),
+        BotCommand("check", "Проверить сайты вручную"),
+        BotCommand("stop", "Остановить авто-проверку")
+
+    ])
+
+    app.add_handler(CommandHandler("start", checker.start))
+    app.add_handler(CommandHandler("check", checker.manual_check))  # если у тебя реализована ручная проверка
 
     app.job_queue.run_repeating(checker.auto_check, interval=3600, first=10)
 
-    print("Бот запущен.")
+    print("🤖 Бот запущен.")
     await app.run_polling()
+
 
 if __name__ == "__main__":
     import nest_asyncio
