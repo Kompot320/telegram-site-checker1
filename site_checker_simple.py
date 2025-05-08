@@ -3,7 +3,7 @@ import asyncio
 from datetime import datetime
 from telegram import Update
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, ContextTypes, Application,
+    ApplicationBuilder, CommandHandler, ContextTypes
 )
 import nest_asyncio
 
@@ -79,32 +79,15 @@ async def main():
     app.add_handler(CommandHandler("check", checker.manual_check))
     app.add_handler(CommandHandler("stop", checker.stop_command))
 
-    # Инициализация job_queue после запуска
-    async def on_startup(application: Application):
-        application.job_queue.run_repeating(checker.auto_check, interval=3600, first=10)
-
-    app.post_init = on_startup
-
-    print("✅ Бот запущен.")
-    from telegram.ext import Application, CommandHandler
-
-async def main():
-    app = Application.builder().token(BOT_TOKEN).build()
-
-    checker = SiteChecker()
-
-    app.add_handler(CommandHandler("start", checker.start_command))
-    app.add_handler(CommandHandler("check", checker.manual_check))
-    app.add_handler(CommandHandler("stop", checker.stop_command))
-
-    # Настроим webhook для вашего сервера:
+    # Настройка Webhook (если требуется)
+    # Убедитесь, что этот URL доступен извне и поддерживает HTTPS
     await app.bot.set_webhook(url='https://yourdomain.com/webhook')
 
-
     print("Webhook активирован.")
+
+    # Используйте run_polling только для отладки. На продакшн-сервере используйте Webhook.
     await app.run_polling(drop_pending_updates=True)  # Для отладки используем run_polling
 
 if __name__ == "__main__":
-    import asyncio
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
