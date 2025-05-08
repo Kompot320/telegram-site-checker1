@@ -5,7 +5,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from datetime import datetime
 
 # ==== НАСТРОЙКИ ====
-TOKEN = '6611255147:AAEqcMrYpbyGB0vWaSPvDKloNcs2VpUp5DI'
+TOKEN = '8158547630:AAHXDP-vH6Y2T6IU3Du__n3MjA55ETZ30Kg'
 WEBHOOK_URL = 'https://arbin.online/api/bot'
 CHECK_INTERVAL = 60  # Интервал в секундах между проверками сайтов
 
