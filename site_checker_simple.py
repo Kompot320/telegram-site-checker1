@@ -1,15 +1,17 @@
+import os
 import requests
 import asyncio
 from datetime import datetime
 from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, ContextTypes, Application
-)
+from telegram.ext import Application, CommandHandler, ContextTypes, ApplicationBuilder
+from flask import Flask
 import nest_asyncio
+import threading
 
 nest_asyncio.apply()
 
-BOT_TOKEN = "8158547630:AAHXDP-vH6Y2T6IU3Du__n3MjA55ETZ30Kg"  # ← ЗАМЕНИ на свой токен от BotFather
+# 💡 Получаем токен
+BOT_TOKEN = "8158547630:AAHXDP-vH6Y2T6IU3Du__n3MjA55ETZ30Kg"  # <-- замени на свой токен
 
 active_users = set()
 
@@ -22,7 +24,6 @@ class SiteChecker:
             with open('sites_list.txt', 'r') as f:
                 return [line.strip() for line in f if line.strip()]
         except FileNotFoundError:
-            print("⚠️ Файл sites_list.txt не найден.")
             return []
 
     def check_site(self, url):
@@ -36,25 +37,23 @@ class SiteChecker:
 
     async def auto_check(self, context: ContextTypes.DEFAULT_TYPE):
         down_sites = [site for site in self.sites if not self.check_site(site)]
-
         if not down_sites:
             return
 
-        text = f"❌ Обнаружены недоступные сайты ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')}):\n"
+        text = f"❌ Недоступны сайты ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')}):\n"
         text += "\n".join(down_sites)
 
         for user_id in active_users:
             try:
                 await context.bot.send_message(chat_id=user_id, text=text)
             except Exception as e:
-                print(f"Ошибка отправки пользователю {user_id}: {e}")
+                print(f"Ошибка отправки {user_id}: {e}")
 
     async def manual_check(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        report = [f"🔍 Ручная проверка сайтов ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')}):"]
+        report = [f"🔍 Проверка ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')}):"]
         for site in self.sites:
-            status = "✅ Доступен" if self.check_site(site) else "❌ Не доступен"
+            status = "✅ Доступен" if self.check_site(site) else "❌ Не работает"
             report.append(f"{site}: {status}")
-
         await context.bot.send_message(chat_id=update.effective_chat.id, text="\n".join(report))
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -62,31 +61,38 @@ class SiteChecker:
         active_users.add(user_id)
         await context.bot.send_message(
             chat_id=user_id,
-            text="✅ Вы подписались на автоматическую проверку. Чтобы остановить — команда /stop"
+            text="✅ Подписка на авто-проверку активирована. Чтобы отписаться, отправь /stop"
         )
 
     async def stop_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_chat.id
-        if user_id in active_users:
-            active_users.remove(user_id)
-            await context.bot.send_message(chat_id=user_id, text="🛑 Вы отписались от уведомлений.")
-        else:
-            await context.bot.send_message(chat_id=user_id, text="ℹ️ Вы не были подписаны.")
+        active_users.discard(user_id)
+        await context.bot.send_message(chat_id=user_id, text="🛑 Вы отписались от уведомлений.")
 
-async def main():
-    app: Application = ApplicationBuilder().token(BOT_TOKEN).build()
+# 🚀 Flask-сервер (нужен Render для порта)
+web_app = Flask(__name__)
+
+@web_app.route("/")
+def home():
+    return "Бот работает!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 5000))
+    web_app.run(host="0.0.0.0", port=port)
+
+# ✅ Запуск бота
+async def run_bot():
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
     checker = SiteChecker()
 
-    # Команды
     app.add_handler(CommandHandler("start", checker.start_command))
     app.add_handler(CommandHandler("check", checker.manual_check))
     app.add_handler(CommandHandler("stop", checker.stop_command))
 
-    # Автопроверка раз в час
     app.job_queue.run_repeating(checker.auto_check, interval=3600, first=10)
-
-    print("✅ Бот запущен.")
+    print("Телеграм-бот запущен.")
     await app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    threading.Thread(target=run_flask).start()
+    asyncio.run(run_bot())
