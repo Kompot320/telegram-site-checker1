@@ -86,7 +86,23 @@ async def main():
     app.post_init = on_startup
 
     print("✅ Бот запущен.")
-    await app.run_polling()
+    from telegram.ext import Application, CommandHandler
+
+async def main():
+    app = Application.builder().token(BOT_TOKEN).build()
+
+    checker = SiteChecker()
+
+    app.add_handler(CommandHandler("start", checker.start_command))
+    app.add_handler(CommandHandler("check", checker.manual_check))
+    app.add_handler(CommandHandler("stop", checker.stop_command))
+
+    # Настроим webhook для вашего сервера:
+    app.bot.set_webhook(url='https://<your-server-url>/webhook')
+
+    print("Webhook активирован.")
+    await app.start_polling(drop_pending_updates=True)  # Используем start_polling для отладки, на проде обычно webhook
+
 
 if __name__ == "__main__":
     import sys
