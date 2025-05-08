@@ -98,7 +98,8 @@ async def main():
     app.add_handler(CommandHandler("stop", checker.stop_command))
 
     # Настроим webhook для вашего сервера:
-    await app.bot.set_webhook(url='https://<your-server-url>/webhook')
+    await app.bot.set_webhook(url='https://yourdomain.com/webhook')
+
 
     print("Webhook активирован.")
     await app.run_polling(drop_pending_updates=True)  # Для отладки используем run_polling
