@@ -2,12 +2,14 @@ import requests
 import asyncio
 from datetime import datetime
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, ContextTypes, Application,
+)
 import nest_asyncio
 
 nest_asyncio.apply()
 
-BOT_TOKEN = "8158547630:AAHXDP-vH6Y2T6IU3Du__n3MjA55ETZ30Kg"  # ← из BotFather
+BOT_TOKEN = "8158547630:AAHXDP-vH6Y2T6IU3Du__n3MjA55ETZ30Kg"  # ← замени на свой BotFather токен
 
 active_users = set()
 
@@ -33,7 +35,6 @@ class SiteChecker:
 
     async def auto_check(self, context: ContextTypes.DEFAULT_TYPE):
         down_sites = [site for site in self.sites if not self.check_site(site)]
-
         if down_sites:
             text = f"❌ Недоступные сайты ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')}):\n" + "\n".join(down_sites)
             for user_id in active_users:
@@ -70,14 +71,19 @@ class SiteChecker:
             await context.bot.send_message(chat_id=user_id, text="ℹ️ Вы не были подписаны.")
 
 async def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
     checker = SiteChecker()
+
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", checker.start_command))
     app.add_handler(CommandHandler("check", checker.manual_check))
     app.add_handler(CommandHandler("stop", checker.stop_command))
 
-    app.job_queue.run_repeating(checker.auto_check, interval=3600, first=10)
+    # Инициализация job_queue после запуска
+    async def on_startup(application: Application):
+        application.job_queue.run_repeating(checker.auto_check, interval=3600, first=10)
+
+    app.post_init = on_startup
 
     print("✅ Бот запущен.")
     await app.run_polling()
