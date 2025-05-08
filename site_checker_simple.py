@@ -76,7 +76,7 @@ class SiteChecker:
 
 async def main():
     checker = SiteChecker()
-    app = ApplicationBuilder().token(8158547630:AAHXDP-vH6Y2T6IU3Du__n3MjA55ETZ30Kg).build()
+    app = ApplicationBuilder().token("8158547630:AAHXDP-vH6Y2T6IU3Du__n3MjA55ETZ30Kg").build()
 
     app.add_handler(CommandHandler("start", checker.start_command))
     app.add_handler(CommandHandler("check", checker.manual_check))
@@ -92,8 +92,8 @@ async def main():
     aio_app = web.Application()
     aio_app.add_routes([web.post(WEBHOOK_PATH, handle)])
 
-    await app.bot.set_webhook(WEBHOOK_URL)
-    print(f"✅ Webhook установлен: {WEBHOOK_URL}")
+    await app.bot.set_webhook(https://telegram-site-checker1.onrender.com)
+    print(f"✅ Webhook установлен: {https://telegram-site-checker1.onrender.com}")
 
     runner = web.AppRunner(aio_app)
     await runner.setup()
