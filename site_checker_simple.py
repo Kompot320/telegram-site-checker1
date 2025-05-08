@@ -1,17 +1,13 @@
-import os
 import requests
 import asyncio
 from datetime import datetime
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes, ApplicationBuilder
-from flask import Flask
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import nest_asyncio
-import threading
 
 nest_asyncio.apply()
 
-# 💡 Получаем токен
-BOT_TOKEN = "8158547630:AAHXDP-vH6Y2T6IU3Du__n3MjA55ETZ30Kg"  # <-- замени на свой токен
+BOT_TOKEN = "8158547630:AAHXDP-vH6Y2T6IU3Du__n3MjA55ETZ30Kg"  # ← из BotFather
 
 active_users = set()
 
@@ -37,51 +33,43 @@ class SiteChecker:
 
     async def auto_check(self, context: ContextTypes.DEFAULT_TYPE):
         down_sites = [site for site in self.sites if not self.check_site(site)]
-        if not down_sites:
-            return
 
-        text = f"❌ Недоступны сайты ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')}):\n"
-        text += "\n".join(down_sites)
-
-        for user_id in active_users:
-            try:
-                await context.bot.send_message(chat_id=user_id, text=text)
-            except Exception as e:
-                print(f"Ошибка отправки {user_id}: {e}")
+        if down_sites:
+            text = f"❌ Недоступные сайты ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')}):\n" + "\n".join(down_sites)
+            for user_id in active_users:
+                try:
+                    await context.bot.send_message(chat_id=user_id, text=text)
+                except Exception as e:
+                    print(f"Ошибка отправки {user_id}: {e}")
 
     async def manual_check(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        report = [f"🔍 Проверка ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')}):"]
+        report = [f"🔍 Проверка сайтов ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')}):"]
+        all_up = True
         for site in self.sites:
-            status = "✅ Доступен" if self.check_site(site) else "❌ Не работает"
-            report.append(f"{site}: {status}")
+            is_up = self.check_site(site)
+            if not is_up:
+                all_up = False
+            report.append(f"{site}: {'✅' if is_up else '❌'}")
+
+        if all_up:
+            report.append("\n🎉 Все сайты работают!")
+
         await context.bot.send_message(chat_id=update.effective_chat.id, text="\n".join(report))
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_chat.id
         active_users.add(user_id)
-        await context.bot.send_message(
-            chat_id=user_id,
-            text="✅ Подписка на авто-проверку активирована. Чтобы отписаться, отправь /stop"
-        )
+        await context.bot.send_message(chat_id=user_id, text="✅ Вы подписались на авто-проверку. /stop — отписаться.")
 
     async def stop_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_chat.id
-        active_users.discard(user_id)
-        await context.bot.send_message(chat_id=user_id, text="🛑 Вы отписались от уведомлений.")
+        if user_id in active_users:
+            active_users.remove(user_id)
+            await context.bot.send_message(chat_id=user_id, text="🛑 Вы отписались от авто-проверки.")
+        else:
+            await context.bot.send_message(chat_id=user_id, text="ℹ️ Вы не были подписаны.")
 
-# 🚀 Flask-сервер (нужен Render для порта)
-web_app = Flask(__name__)
-
-@web_app.route("/")
-def home():
-    return "Бот работает!"
-
-def run_flask():
-    port = int(os.environ.get("PORT", 5000))
-    web_app.run(host="0.0.0.0", port=port)
-
-# ✅ Запуск бота
-async def run_bot():
+async def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     checker = SiteChecker()
 
@@ -90,9 +78,9 @@ async def run_bot():
     app.add_handler(CommandHandler("stop", checker.stop_command))
 
     app.job_queue.run_repeating(checker.auto_check, interval=3600, first=10)
-    print("Телеграм-бот запущен.")
+
+    print("✅ Бот запущен.")
     await app.run_polling()
 
 if __name__ == "__main__":
-    threading.Thread(target=run_flask).start()
-    asyncio.run(run_bot())
+    asyncio.run(main())
