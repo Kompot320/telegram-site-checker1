@@ -98,16 +98,12 @@ async def main():
     app.add_handler(CommandHandler("stop", checker.stop_command))
 
     # Настроим webhook для вашего сервера:
-    app.bot.set_webhook(url='https://<your-server-url>/webhook')
+    await app.bot.set_webhook(url='https://<your-server-url>/webhook')
 
     print("Webhook активирован.")
-    await app.start_polling(drop_pending_updates=True)  # Используем start_polling для отладки, на проде обычно webhook
-
+    await app.run_polling(drop_pending_updates=True)  # Для отладки используем run_polling
 
 if __name__ == "__main__":
-    import sys
-    if sys.platform == "win32":
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    import asyncio
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
-
