@@ -92,7 +92,7 @@ async def main():
     aio_app = web.Application()
     aio_app.add_routes([web.post(WEBHOOK_PATH, handle)])
 
-    await app.bot.set_webhook(https://telegram-site-checker1.onrender.com)
+    await app.bot.set_webhook("https://telegram-site-checker1.onrender.com")
     print(f"✅ Webhook установлен: {https://telegram-site-checker1.onrender.com}")
 
     runner = web.AppRunner(aio_app)
