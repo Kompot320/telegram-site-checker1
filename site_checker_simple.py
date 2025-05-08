@@ -7,7 +7,7 @@ from telegram import Update
 # Замените на ваш токен
 BOT_TOKEN = "8158547630:AAHXDP-vH6Y2T6IU3Du__n3MjA55ETZ30Kg"
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
-WEBHOOK_URL = "https://your-service-name.onrender.com/webhook/..."
+WEBHOOK_URL = "https://telegram-site-checker1.onrender.com/webhook"
 
 
 active_users = set()
