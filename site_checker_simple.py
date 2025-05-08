@@ -6,7 +6,7 @@ from datetime import datetime
 
 # ==== НАСТРОЙКИ ====
 TOKEN = '8158547630:AAHXDP-vH6Y2T6IU3Du__n3MjA55ETZ30Kg'
-WEBHOOK_URL = 'https://arbin.online/api/bot'
+WEBHOOK_URL = "https://telegram-site-checker1.onrender.com/webhook"
 CHECK_INTERVAL = 60  # Интервал в секундах между проверками сайтов
 
 # ==== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ====
