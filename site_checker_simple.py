@@ -76,7 +76,7 @@ class SiteChecker:
 
 async def main():
     checker = SiteChecker()
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app = ApplicationBuilder().token(8158547630:AAHXDP-vH6Y2T6IU3Du__n3MjA55ETZ30Kg).build()
 
     app.add_handler(CommandHandler("start", checker.start_command))
     app.add_handler(CommandHandler("check", checker.manual_check))
