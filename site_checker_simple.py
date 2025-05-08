@@ -1,95 +1,92 @@
-import os
-import logging
+import requests
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime
 from telegram import Update
-from telegram.ext import Application, CommandHandler, CallbackContext, JobQueue
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, ContextTypes, Application
+)
+import nest_asyncio
 
-# Получаем токен из переменной окружения
-TOKEN = os.getenv('8191040502:AAGlmsKS0n9uKny-hbM5mQmrrp2ETN3B9NE')  # Убедитесь, что переменная окружения установлена
+nest_asyncio.apply()
 
-# Настройка логирования
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
-logger = logging.getLogger(__name__)
+BOT_TOKEN = "8191040502:AAGlmsKS0n9uKny-hbM5mQmrrp2ETN3B9NE"  # ← ЗАМЕНИ на свой токен от BotFather
 
-# Список сайтов для проверки
-sites = ['https://example.com', 'https://another-site.com']
 active_users = set()
 
-# Функция старта
-async def start(update: Update, context: CallbackContext) -> None:
-    user = update.message.from_user
-    active_users.add(user.id)
-    await update.message.reply_text(f"Привет, {user.first_name}! Ты теперь можешь использовать команды /check и /stop.")
+class SiteChecker:
+    def __init__(self):
+        self.sites = self.load_sites()
 
-# Функция проверки сайтов
-def check_sites() -> str:
-    # Проверка сайтов
-    down_sites = []
-    for site in sites:
-        # Пример логики для проверки сайта (замени на свою)
-        site_is_up = True  # Для теста все сайты считаются рабочими
-        if not site_is_up:
-            down_sites.append(site)
-    return down_sites
+    def load_sites(self):
+        try:
+            with open('sites_list.txt', 'r') as f:
+                return [line.strip() for line in f if line.strip()]
+        except FileNotFoundError:
+            print("⚠️ Файл sites_list.txt не найден.")
+            return []
 
-# Функция, которая отправляет сообщение о неработающих сайтах
-async def check(update: Update, context: CallbackContext) -> None:
-    user = update.message.from_user
-    if user.id not in active_users:
-        await update.message.reply_text("Ты не зарегистрирован для использования команд.")
-        return
+    def check_site(self, url):
+        try:
+            if not url.startswith(('http://', 'https://')):
+                url = 'https://' + url
+            response = requests.get(url, timeout=10)
+            return response.status_code == 200
+        except:
+            return False
 
-    await update.message.reply_text("Запуск проверки сайтов...")
-    down_sites = check_sites()
+    async def auto_check(self, context: ContextTypes.DEFAULT_TYPE):
+        down_sites = [site for site in self.sites if not self.check_site(site)]
 
-    if down_sites:
-        await update.message.reply_text(f"Не работают следующие сайты: {', '.join(down_sites)}")
-    else:
-        await update.message.reply_text("Все сайты работают!")
+        if not down_sites:
+            return
 
-# Функция команды /stop
-async def stop(update: Update, context: CallbackContext) -> None:
-    user = update.message.from_user
-    if user.id not in active_users:
-        await update.message.reply_text("Ты не зарегистрирован для использования команд.")
-        return
+        text = f"❌ Обнаружены недоступные сайты ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')}):\n"
+        text += "\n".join(down_sites)
 
-    await update.message.reply_text("Остановка проверки сайта...")
-
-# Функция, которая будет выполняться каждый час
-async def hourly_check(context: CallbackContext) -> None:
-    down_sites = check_sites()
-    if down_sites:
         for user_id in active_users:
-            await context.bot.send_message(user_id, f"Не работают следующие сайты: {', '.join(down_sites)}")
-    else:
-        for user_id in active_users:
-            await context.bot.send_message(user_id, "Все сайты работают!")
+            try:
+                await context.bot.send_message(chat_id=user_id, text=text)
+            except Exception as e:
+                print(f"Ошибка отправки пользователю {user_id}: {e}")
 
-# Основная функция для настройки бота
-async def main() -> None:
-    """Запуск бота."""
-    application = Application.builder().token(TOKEN).build()
+    async def manual_check(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        report = [f"🔍 Ручная проверка сайтов ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')}):"]
+        for site in self.sites:
+            status = "✅ Доступен" if self.check_site(site) else "❌ Не доступен"
+            report.append(f"{site}: {status}")
 
-    # Регистрируем обработчики команд
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("check", check))
-    application.add_handler(CommandHandler("stop", stop))
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="\n".join(report))
 
-    # Работает JobQueue для повторяющихся задач (например, ежечасная проверка)
-    job_queue = application.job_queue
+    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_chat.id
+        active_users.add(user_id)
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="✅ Вы подписались на автоматическую проверку. Чтобы остановить — команда /stop"
+        )
 
-    # Настройка повторяющихся задач (каждый час в начале)
-    now = datetime.now()
-    # Следующий момент начала часа
-    next_hour = (now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
+    async def stop_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_chat.id
+        if user_id in active_users:
+            active_users.remove(user_id)
+            await context.bot.send_message(chat_id=user_id, text="🛑 Вы отписались от уведомлений.")
+        else:
+            await context.bot.send_message(chat_id=user_id, text="ℹ️ Вы не были подписаны.")
 
-    # Запуск задачи в следующий час и каждый час после этого
-    job_queue.run_repeating(hourly_check, interval=3600, first=next_hour)
+async def main():
+    app: Application = ApplicationBuilder().token(BOT_TOKEN).build()
+    checker = SiteChecker()
 
-    # Запуск бота
-    await application.run_polling()
+    # Команды
+    app.add_handler(CommandHandler("start", checker.start_command))
+    app.add_handler(CommandHandler("check", checker.manual_check))
+    app.add_handler(CommandHandler("stop", checker.stop_command))
 
-if __name__ == '__main__':
+    # Автопроверка раз в час
+    app.job_queue.run_repeating(checker.auto_check, interval=3600, first=10)
+
+    print("✅ Бот запущен.")
+    await app.run_polling()
+
+if __name__ == "__main__":
     asyncio.run(main())
