@@ -1,93 +1,49 @@
-import requests
-import asyncio
-from datetime import datetime
+import os
+from aiohttp import web
+from telegram.ext import ApplicationBuilder, CommandHandler
+from telegram.ext import ContextTypes
 from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, ContextTypes
-)
-import nest_asyncio
 
-nest_asyncio.apply()
-
-BOT_TOKEN = "8158547630:AAHXDP-vH6Y2T6IU3Du__n3MjA55ETZ30Kg"  # ← замени на свой BotFather токен
+# Замените на ваш токен
+BOT_TOKEN = "8158547630:AAHXDP-vH6Y2T6IU3Du__n3MjA55ETZ30Kg"
+WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
+WEBHOOK_URL = f"https://your-service-name.onrender.com{WEBHOOK_PATH}"
 
 active_users = set()
 
-class SiteChecker:
-    def __init__(self):
-        self.sites = self.load_sites()
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_chat.id
+    active_users.add(user_id)
+    await update.message.reply_text("✅ Вы подписались на авто-проверку.")
 
-    def load_sites(self):
-        try:
-            with open('sites_list.txt', 'r') as f:
-                return [line.strip() for line in f if line.strip()]
-        except FileNotFoundError:
-            return []
+async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_chat.id
+    active_users.discard(user_id)
+    await update.message.reply_text("🛑 Вы отписались.")
 
-    def check_site(self, url):
-        try:
-            if not url.startswith(('http://', 'https://')):
-                url = 'https://' + url
-            response = requests.get(url, timeout=10)
-            return response.status_code == 200
-        except:
-            return False
+async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🔍 Проверка пока заглушка.")  # Замените на логику проверки
 
-    async def auto_check(self, context: ContextTypes.DEFAULT_TYPE):
-        down_sites = [site for site in self.sites if not self.check_site(site)]
-        if down_sites:
-            text = f"❌ Недоступные сайты ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')}):\n" + "\n".join(down_sites)
-            for user_id in active_users:
-                try:
-                    await context.bot.send_message(chat_id=user_id, text=text)
-                except Exception as e:
-                    print(f"Ошибка отправки {user_id}: {e}")
-
-    async def manual_check(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        report = [f"🔍 Проверка сайтов ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')}):"]
-        all_up = True
-        for site in self.sites:
-            is_up = self.check_site(site)
-            if not is_up:
-                all_up = False
-            report.append(f"{site}: {'✅' if is_up else '❌'}")
-
-        if all_up:
-            report.append("\n🎉 Все сайты работают!")
-
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="\n".join(report))
-
-    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_id = update.effective_chat.id
-        active_users.add(user_id)
-        await context.bot.send_message(chat_id=user_id, text="✅ Вы подписались на авто-проверку. /stop — отписаться.")
-
-    async def stop_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_id = update.effective_chat.id
-        if user_id in active_users:
-            active_users.remove(user_id)
-            await context.bot.send_message(chat_id=user_id, text="🛑 Вы отписались от авто-проверки.")
-        else:
-            await context.bot.send_message(chat_id=user_id, text="ℹ️ Вы не были подписаны.")
+async def healthcheck(request):
+    return web.Response(text="OK")
 
 async def main():
-    checker = SiteChecker()
-
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    app.add_handler(CommandHandler("start", checker.start_command))
-    app.add_handler(CommandHandler("check", checker.manual_check))
-    app.add_handler(CommandHandler("stop", checker.stop_command))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("stop", stop))
+    app.add_handler(CommandHandler("check", check))
 
-    # Настройка Webhook (если требуется)
-    # Убедитесь, что этот URL доступен извне и поддерживает HTTPS
-    await app.bot.set_webhook(url='https://yourdomain.com/webhook')
+    await app.bot.set_webhook(url=WEBHOOK_URL)
 
-    print("Webhook активирован.")
+    aio_app = web.Application()
+    aio_app.router.add_post(WEBHOOK_PATH, app.webhook_handler())
+    aio_app.router.add_get("/", healthcheck)  # простая проверка
 
-    # Используйте run_polling только для отладки. На продакшн-сервере используйте Webhook.
-    await app.run_polling(drop_pending_updates=True)  # Для отладки используем run_polling
+    port = int(os.environ.get("PORT", 10000))  # Render передаёт PORT как переменную окружения
+    print(f"✅ Запуск на порту {port}")
+    web.run_app(aio_app, port=port)
 
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
+    import asyncio
+    asyncio.run(main())
