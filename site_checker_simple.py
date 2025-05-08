@@ -74,15 +74,18 @@ class SiteChecker:
             await context.bot.send_message(chat_id=user_id, text="ℹ️ Вы не были подписаны.")
 
 
+async def setup_jobs(app: Application):
+    checker = SiteChecker()
+    app.job_queue.run_repeating(checker.auto_check, interval=3600, first=10)
+
+
 async def main():
     checker = SiteChecker()
-    app = ApplicationBuilder().token("8158547630:AAHXDP-vH6Y2T6IU3Du__n3MjA55ETZ30Kg").build()
+    app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).post_init(setup_jobs).build()
 
     app.add_handler(CommandHandler("start", checker.start_command))
     app.add_handler(CommandHandler("check", checker.manual_check))
     app.add_handler(CommandHandler("stop", checker.stop_command))
-
-    app.job_queue.run_repeating(checker.auto_check, interval=3600, first=10)
 
     async def handle(request):
         data = await request.json()
@@ -92,16 +95,13 @@ async def main():
     aio_app = web.Application()
     aio_app.add_routes([web.post(WEBHOOK_PATH, handle)])
 
-    await app.bot.set_webhook("https://telegram-site-checker1.onrender.com")
-    print(f"✅ Webhook установлен: {https://telegram-site-checker1.onrender.com}")
+    await app.bot.set_webhook(WEBHOOK_URL)
+    print(f"✅ Webhook установлен: {WEBHOOK_URL}")
 
     runner = web.AppRunner(aio_app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", 10000)
     await site.start()
     await app.start()
-    await app.updater.start_polling()
     await asyncio.Event().wait()
 
-if __name__ == "__main__":
-    asyncio.run(main())
