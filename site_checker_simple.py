@@ -1,17 +1,17 @@
 import os
 import asyncio
 from datetime import datetime
-
 import requests
 from aiohttp import web
 from telegram import Update
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, ContextTypes
+    ApplicationBuilder, CommandHandler, ContextTypes, Application
 )
 
+# 🔐 Твой токен и URL
 BOT_TOKEN = "8158547630:AAHXDP-vH6Y2T6IU3Du__n3MjA55ETZ30Kg"
 WEBHOOK_PATH = "/webhook"
-WEBHOOK_URL = f"https://telegram-site-checker1.onrender.com{WEBHOOK_PATH}"
+WEBHOOK_URL = "https://telegram-site-checker1.onrender.com/webhook"
 
 active_users = set()
 
@@ -31,12 +31,18 @@ class SiteChecker:
         try:
             if not url.startswith(('http://', 'https://')):
                 url = 'https://' + url
-            response = requests.get(url, timeout=10)
+            headers = {
+                "User-Agent": "Mozilla/5.0 (compatible; SiteCheckerBot/1.0; +https://example.com)"
+            }
+            response = requests.get(url, headers=headers, timeout=10, allow_redirects=True)
+            print(f"[CHECK] {url} -> {response.status_code}")
             return response.status_code == 200
-        except:
+        except Exception as e:
+            print(f"[ERROR] {url} -> {e}")
             return False
 
     async def auto_check(self, context: ContextTypes.DEFAULT_TYPE):
+        print("[AUTO CHECK] Started...")
         down_sites = [site for site in self.sites if not self.check_site(site)]
         if down_sites:
             text = f"❌ Недоступные сайты ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')}):\n" + "\n".join(down_sites)
@@ -45,6 +51,8 @@ class SiteChecker:
                     await context.bot.send_message(chat_id=user_id, text=text)
                 except Exception as e:
                     print(f"Ошибка отправки {user_id}: {e}")
+        else:
+            print("[AUTO CHECK] Все сайты работают.")
 
     async def manual_check(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         report = [f"🔍 Проверка сайтов ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')}):"]
@@ -82,30 +90,29 @@ async def main():
     app.add_handler(CommandHandler("check", checker.manual_check))
     app.add_handler(CommandHandler("stop", checker.stop_command))
 
-    # Планировщик (JobQueue) будет работать после инициализации
+    # ✅ Настройка авто-проверки раз в час
     app.job_queue.run_repeating(checker.auto_check, interval=3600, first=10)
 
-    # aiohttp веб-сервер
     async def handle(request):
         data = await request.json()
         await app.update_queue.put(Update.de_json(data, app.bot))
         return web.Response()
 
+    # 🛰️ AIOHTTP сервер для Telegram Webhook
     aio_app = web.Application()
     aio_app.add_routes([web.post(WEBHOOK_PATH, handle)])
 
-    # Установка вебхука
+    # ✅ Порядок запуска
+    await app.initialize()
+    await app.start()
     await app.bot.set_webhook(WEBHOOK_URL)
     print(f"✅ Webhook установлен: {WEBHOOK_URL}")
 
-    # Запуск aiohttp и Telegram Application
     runner = web.AppRunner(aio_app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", 10000)
     await site.start()
 
-    await app.initialize()
-    await app.start()
     await asyncio.Event().wait()
 
 
