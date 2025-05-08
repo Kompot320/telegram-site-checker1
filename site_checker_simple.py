@@ -9,9 +9,9 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, ContextTypes, Application
 )
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = os.getenv("8158547630:AAHXDP-vH6Y2T6IU3Du__n3MjA55ETZ30Kg")
 WEBHOOK_PATH = "/webhook"
-WEBHOOK_URL = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}{WEBHOOK_PATH}"
+WEBHOOK_URL = f"https://{os.getenv('https://telegram-site-checker1.onrender.com')}{WEBHOOK_PATH}"
 
 active_users = set()
 
