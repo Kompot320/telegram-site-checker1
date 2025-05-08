@@ -6,7 +6,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackContext, JobQueue
 
 # Получаем токен из переменной окружения
-TOKEN = os.getenv('8191040502:AAHLup7zN6FoUfswuO43VT6wI3I1Yyy_wm0')  # Убедитесь, что переменная окружения установлена
+TOKEN = os.getenv('8191040502:AAGlmsKS0n9uKny-hbM5mQmrrp2ETN3B9NE')  # Убедитесь, что переменная окружения установлена
 
 # Настройка логирования
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
