@@ -1,166 +1,115 @@
-import os
 import asyncio
-from datetime import datetime
-import requests
-
-from aiohttp import web
+import datetime
+import aiohttp
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler, Application
+    Application, CommandHandler, CallbackQueryHandler,
+    ContextTypes
 )
 
-BOT_TOKEN = "8158547630:AAHXDP-vH6Y2T6IU3Du__n3MjA55ETZ30Kg"
-WEBHOOK_PATH = "/webhook"
-WEBHOOK_URL = f"https://telegram-site-checker1.onrender.com{WEBHOOK_PATH}"
+API_TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN_HERE'  # 👈 ВСТАВЬ СЮДА СВОЙ ТОКЕН
 
-active_users = set()
+# Хранилища
+user_sites = {}       # {user_id: [url1, url2, ...]}
+user_statuses = {}    # {user_id: {url: bool}}
+
+CHECK_INTERVAL = 3600  # каждые 60 минут
 
 
-class SiteChecker:
-    def __init__(self):
-        self.sites = self.load_sites()
-        self.site_status = {site: None for site in self.sites}  # None = unknown, True = up, False = down
+def log_status_change(user_id, url, is_up):
+    status = "UP" if is_up else "DOWN"
+    time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open("down_log.txt", "a") as log_file:
+        log_file.write(f"{time_str} | User {user_id} | {url} is {status}\n")
 
-    def load_sites(self):
-        try:
-            with open('sites_list.txt', 'r') as f:
-                return [line.strip() for line in f if line.strip()]
-        except FileNotFoundError:
-            return []
 
-    def check_site(self, url):
-        try:
-            if not url.startswith(('http://', 'https://')):
-                url = 'https://' + url
-            response = requests.get(url, timeout=10)
-            return response.status_code == 200
-        except:
-            return False
+async def check_site(url):
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=10) as resp:
+                return resp.status < 400
+    except:
+        return False
 
-    def log_status_change(self, site, status):
-        with open("down_log.txt", "a") as f:
-            time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            if status:
-                f.write(f"{time_str} — ✅ Восстановлен: {site}\n")
-            else:
-                f.write(f"{time_str} — ❌ Упал: {site}\n")
 
-    async def auto_check(self, context: ContextTypes.DEFAULT_TYPE):
-        for site in self.sites:
-            is_up = self.check_site(site)
-            prev_status = self.site_status.get(site)
+async def send_site_status(user_id, bot, url, is_up):
+    msg = f"✅ Сайт снова доступен: {url}" if is_up else f"⛔ Сайт недоступен: {url}"
+    await bot.send_message(chat_id=user_id, text=msg)
 
-            # Только если статус изменился
-            if prev_status is not None and prev_status != is_up:
-                self.site_status[site] = is_up
-                self.log_status_change(site, is_up)
 
-                status_text = (
-                    f"✅ Сайт снова работает: {site}" if is_up
-                    else f"❌ Сайт упал: {site}"
-                )
+async def check_all_users(bot):
+    while True:
+        for user_id, urls in user_sites.items():
+            for url in urls:
+                is_up = await check_site(url)
+                last_status = user_statuses[user_id].get(url)
 
-                for user_id in active_users:
-                    try:
-                        await context.bot.send_message(chat_id=user_id, text=status_text)
-                    except Exception as e:
-                        print(f"Ошибка при отправке пользователю {user_id}: {e}")
+                if last_status is None:
+                    user_statuses[user_id][url] = is_up
+                elif last_status != is_up:
+                    user_statuses[user_id][url] = is_up
+                    log_status_change(user_id, url, is_up)
+                    await send_site_status(user_id, bot, url, is_up)
 
-            else:
-                self.site_status[site] = is_up  # обновляем статус
+        await asyncio.sleep(CHECK_INTERVAL)
 
-    async def manual_check(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        report = [f"🔍 Ручная проверка сайтов ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')}):"]
-        all_up = True
 
-        for site in self.sites:
-            is_up = self.check_site(site)
-            self.site_status[site] = is_up
-            if not is_up:
-                all_up = False
-            report.append(f"{site}: {'✅' if is_up else '❌'}")
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    # Примерные сайты по умолчанию
+    if user_id not in user_sites:
+        user_sites[user_id] = ['https://example.com']
+        user_statuses[user_id] = {}
 
-        if all_up:
-            report.append("\n🎉 Все сайты работают!")
+    buttons = [
+        [InlineKeyboardButton("🔄 Проверить сейчас", callback_data='check_now')],
+        [InlineKeyboardButton("📊 Статус сайтов", callback_data='status')],
+        [InlineKeyboardButton("⛔ Остановить авто-проверку", callback_data='stop')]
+    ]
+    markup = InlineKeyboardMarkup(buttons)
+    await update.message.reply_text("🚀 Мониторинг запущен!", reply_markup=markup)
 
-        await update.message.reply_text("\n".join(report), reply_markup=self.get_keyboard())
 
-    async def show_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        report = [f"📊 Статус сайтов:"]
-        for site in self.sites:
-            status = self.site_status.get(site)
-            report.append(f"{site}: {'✅' if status else '❌' if status is False else '❓ неизвестно'}")
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
 
-        await update.message.reply_text("\n".join(report), reply_markup=self.get_keyboard())
+    if user_id not in user_sites:
+        await query.edit_message_text("Сначала запустите /start")
+        return
 
-    def get_keyboard(self):
-        keyboard = [
-            [
-                InlineKeyboardButton("🔄 Проверить сейчас", callback_data="check_now"),
-                InlineKeyboardButton("📊 Статус сайтов", callback_data="status"),
-                InlineKeyboardButton("⛔ Остановить", callback_data="stop")
-            ]
-        ]
-        return InlineKeyboardMarkup(keyboard)
+    if query.data == 'check_now':
+        messages = []
+        for url in user_sites[user_id]:
+            is_up = await check_site(url)
+            user_statuses[user_id][url] = is_up
+            messages.append(f"{url} — {'✅ Доступен' if is_up else '⛔ Недоступен'}")
+        await query.edit_message_text("Результат:\n" + '\n'.join(messages))
 
-    async def handle_buttons(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        query = update.callback_query
-        await query.answer()
+    elif query.data == 'status':
+        messages = []
+        for url in user_sites[user_id]:
+            status = user_statuses[user_id].get(url)
+            status_str = "❓ Неизвестно" if status is None else ("✅ Доступен" if status else "⛔ Недоступен")
+            messages.append(f"{url} — {status_str}")
+        await query.edit_message_text("Статус сайтов:\n" + '\n'.join(messages))
 
-        if query.data == "check_now":
-            await self.manual_check(update, context)
-        elif query.data == "status":
-            await self.show_status(update, context)
-        elif query.data == "stop":
-            user_id = query.from_user.id
-            active_users.discard(user_id)
-            await query.edit_message_text("🛑 Вы отписались от авто-проверки.")
-
-    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_id = update.effective_chat.id
-        active_users.add(user_id)
-        await update.message.reply_text(
-            "✅ Вы подписались на авто-проверку.",
-            reply_markup=self.get_keyboard()
-        )
-
-    async def stop_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_id = update.effective_chat.id
-        active_users.discard(user_id)
-        await context.bot.send_message(chat_id=user_id, text="🛑 Вы отписались от авто-проверки.")
+    elif query.data == 'stop':
+        user_sites[user_id] = []
+        await query.edit_message_text("⛔ Мониторинг остановлен. Введите /start для запуска.")
 
 
 async def main():
-    checker = SiteChecker()
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app = Application.builder().token(API_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(button_handler))
 
-    app.add_handler(CommandHandler("start", checker.start_command))
-    app.add_handler(CommandHandler("check", checker.manual_check))
-    app.add_handler(CommandHandler("stop", checker.stop_command))
-    app.add_handler(CommandHandler("status", checker.show_status))
-    app.add_handler(CallbackQueryHandler(checker.handle_buttons))
-
-    app.job_queue.run_repeating(checker.auto_check, interval=3600, first=10)
-
-    async def handle(request):
-        data = await request.json()
-        await app.update_queue.put(Update.de_json(data, app.bot))
-        return web.Response()
-
-    aio_app = web.Application()
-    aio_app.add_routes([web.post(WEBHOOK_PATH, handle)])
-
-    await app.bot.set_webhook(WEBHOOK_URL)
-    print(f"✅ Webhook установлен: {WEBHOOK_URL}")
-
-    runner = web.AppRunner(aio_app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", 10000)
-    await site.start()
-
-    await app.start()
-    await asyncio.Event().wait()
+    # Запуск фона
+    asyncio.create_task(check_all_users(app.bot))
+    print("Бот запущен.")
+    await app.run_polling()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     asyncio.run(main())
