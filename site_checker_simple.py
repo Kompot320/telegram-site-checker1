@@ -132,7 +132,11 @@ async def main():
     # Запускаем фоновые задачи
     asyncio.create_task(check_all_users(app.bot))
     print("Бот запущен.")
+    
+    # Запускаем Webhook
     await run_webhook(app)
+
+    # Запускаем бота в фоновом режиме
     await app.run_polling()
 
 
