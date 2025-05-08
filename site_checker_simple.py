@@ -68,17 +68,15 @@ application.add_handler(CommandHandler("add", add))
 application.add_handler(CommandHandler("list", list_sites))
 
 async def main():
-    # Устанавливаем Webhook
+    await application.initialize()
     await application.bot.set_webhook(url=WEBHOOK_URL)
     print(f"✅ Webhook установлен: {WEBHOOK_URL}")
 
-    # Запускаем задачу мониторинга
-    job_queue = application.job_queue
-    job_queue.run_repeating(check_sites, interval=CHECK_INTERVAL, first=10)
+    # теперь можно запускать задачи после initialize
+    application.job_queue.run_repeating(check_sites, interval=CHECK_INTERVAL, first=10)
 
-    await application.initialize()
     await application.start()
-    await application.updater.start_polling()  # на случай, если webhook не сработает
+    await application.updater.start_polling()
     await application.updater.idle()
 
 if __name__ == "__main__":
