@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: site-checker-bot
+    env: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python site_checker_simple.py"
+    envVars:
+      - key: BOT_TOKEN
+        value: "8158547630:AAHXDP-vH6Y2T6IU3Du__n3MjA55ETZ30Kg"  # Замени на твой токен
