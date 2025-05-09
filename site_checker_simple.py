@@ -4,12 +4,26 @@ import asyncio
 import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from aiogram.utils import executor
+from aiogram.dispatcher.webhook import get_new_configured_app
+from aiogram.contrib.middlewares.logging import LoggingMiddleware
+from aiogram.utils.executor import start_webhook
+from fastapi import FastAPI, Request
+from aiogram.dispatcher.webhook import WebhookRequestHandler
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from datetime import datetime
 
 API_TOKEN = os.getenv("BOT_TOKEN")
-bot = Bot(API_TOKEN)
-dp = Dispatcher(bot)
+WEBHOOK_HOST = os.getenv("RENDER_EXTERNAL_URL")  # Render automatically sets this
+WEBHOOK_PATH = "/webhook"
+WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
+
+WEBAPP_HOST = "0.0.0.0"
+WEBAPP_PORT = int(os.getenv("PORT", 10000))
+
+bot = Bot(token=API_TOKEN)
+storage = MemoryStorage()
+dp = Dispatcher(bot, storage=storage)
+dp.middleware.setup(LoggingMiddleware())
 
 subscribed_users = set()
 site_status = {}
@@ -64,11 +78,11 @@ async def monitor_sites():
                         f.write(f"{datetime.now()} — {site} стал недоступен\n")
         await asyncio.sleep(check_interval)
 
-@dp.message_handler(commands=['start', 'menu'])
-async def show_main_menu(message: types.Message):
+@dp.message_handler(commands=['start'])
+async def cmd_start(message: types.Message):
     user_id = message.from_user.id
     subscribed_users.add(user_id)
-    await message.answer("📋 Главное меню. Выберите действие:", reply_markup=get_main_keyboard())
+    await message.answer("✅ Вы подключены к мониторингу сайтов.", reply_markup=get_main_keyboard())
 
 @dp.callback_query_handler(lambda c: c.data in ["check_now", "status", "stop"])
 async def callback_handler(callback_query: types.CallbackQuery):
@@ -96,13 +110,30 @@ async def callback_handler(callback_query: types.CallbackQuery):
 
     elif data == "stop":
         subscribed_users.discard(user_id)
-        await bot.send_message(user_id, "⛔ Вы отписались от уведомлений.", reply_markup=get_main_keyboard())
+        await bot.send_message(user_id, "⛔ Вы отписались от уведомлений.")
         await bot.answer_callback_query(callback_query.id)
 
-async def on_startup(dp):
-    asyncio.create_task(monitor_sites())
+# FastAPI app
+app = FastAPI()
 
-if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+@app.on_event("startup")
+async def on_startup():
+    await bot.set_webhook(WEBHOOK_URL)
+    asyncio.create_task(monitor_sites())
+    logging.info("Webhook set and monitoring started.")
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    await bot.delete_webhook()
+    await dp.storage.close()
+    await dp.storage.wait_closed()
+
+@app.post(WEBHOOK_PATH)
+async def telegram_webhook(request: Request):
+    update = await request.json()
+    telegram_update = types.Update.to_object(update)
+    await dp.process_update(telegram_update)
+    return {"ok": True}
+
 
 
