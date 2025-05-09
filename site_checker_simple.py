@@ -9,7 +9,7 @@ from datetime import datetime
 
 API_TOKEN = os.getenv('8158547630:AAHXDP-vH6Y2T6IU3Du__n3MjA55ETZ30Kg')
 
-bot = Bot(token=https://telegram-site-checker1.onrender.com)
+bot = Bot('https://telegram-site-checker1.onrender.com')
 dp = Dispatcher(bot)
 
 subscribed_users = set()
