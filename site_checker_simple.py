@@ -17,7 +17,7 @@ logging.basicConfig(
 )
 
 # Твой токен Telegram-бота (НЕ ЗАБУДЬ заменить на свой)
-TOKEN = '6765058037:AAHcqJLBzYO_fkiyXQ24-bDXc3mKm44hUNA'
+TOKEN = '8158547630:AAHXDP-vH6Y2T6IU3Du__n3MjA55ETZ30Kg'
 
 # Список сайтов для проверки
 URLS = [
