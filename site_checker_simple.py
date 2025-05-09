@@ -7,9 +7,9 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils import executor
 from datetime import datetime
 
-API_TOKEN = os.getenv('8158547630:AAHXDP-vH6Y2T6IU3Du__n3MjA55ETZ30Kg')
+API_TOKEN = os.getenv("BOT_TOKEN")
+bot = Bot(API_TOKEN)
 
-bot = Bot('https://telegram-site-checker1.onrender.com')
 dp = Dispatcher(bot)
 
 subscribed_users = set()
