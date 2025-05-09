@@ -4,12 +4,12 @@ import asyncio
 import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from aiogram.utils import executor
+from aiogram.utils.executor import start_polling
 from datetime import datetime
+from aiohttp import web  # 🔹 добавили aiohttp сервер
 
 API_TOKEN = os.getenv("BOT_TOKEN")
 bot = Bot(API_TOKEN)
-
 dp = Dispatcher(bot)
 
 subscribed_users = set()
@@ -100,8 +100,25 @@ async def callback_handler(callback_query: types.CallbackQuery):
         await bot.send_message(user_id, "⛔ Вы отписались от уведомлений.")
         await bot.answer_callback_query(callback_query.id)
 
-async def on_startup(dp):
+# 🔹 HTTP-сервер для Render
+async def render_healthcheck(request):
+    return web.Response(text="Bot is running")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", render_healthcheck)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 10000)))
+    await site.start()
+    print(f"==> Web server started on port {os.environ.get('PORT', 10000)}")
+
+# 🔹 Объединяем запуск бота и сервера
+async def main():
+    await start_web_server()
     asyncio.create_task(monitor_sites())
+    await dp.start_polling()
 
 if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+    asyncio.run(main())
+
