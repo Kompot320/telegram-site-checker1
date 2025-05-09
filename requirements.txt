@@ -1,4 +1,5 @@
 python-telegram-bot[job-queue]==20.7
-aiohttp
+aiohttp==3.9.5
+aiogram==2.25.1
 requests
 nest_asyncio
