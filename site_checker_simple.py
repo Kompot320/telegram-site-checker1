@@ -1,25 +1,24 @@
 import logging
 import aiohttp
 import asyncio
+import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils import executor
 from datetime import datetime
 
-API_TOKEN = '8158547630:AAHXDP-vH6Y2T6IU3Du__n3MjA55ETZ30Kg'  # ← Вставьте сюда токен вашего бота
+API_TOKEN = os.getenv('8158547630:AAHXDP-vH6Y2T6IU3Du__n3MjA55ETZ30Kg')
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
-# Храним сайты и статусы по пользователям
-user_sites = {}
-user_status = {}
-user_tasks = {}
+subscribed_users = set()
+site_status = {}
+site_list_file = "sites_list.txt"
+check_interval = 60  # секунд
 
-# Логгер
 logging.basicConfig(level=logging.INFO)
 
-# Кнопки управления
 def get_main_keyboard():
     buttons = [
         InlineKeyboardButton("🔄 Проверить сейчас", callback_data="check_now"),
@@ -28,7 +27,12 @@ def get_main_keyboard():
     ]
     return InlineKeyboardMarkup(row_width=1).add(*buttons)
 
-# Проверка сайта
+def load_sites():
+    if not os.path.exists(site_list_file):
+        return []
+    with open(site_list_file, "r", encoding="utf-8") as f:
+        return [line.strip() for line in f if line.strip()]
+
 async def check_site(url):
     try:
         async with aiohttp.ClientSession() as session:
@@ -37,77 +41,67 @@ async def check_site(url):
     except Exception:
         return False
 
-# Отправка уведомления при изменении статуса
-async def notify_changes(user_id):
-    for url in user_sites[user_id]:
-        is_up = await check_site(url)
-        if user_status[user_id].get(url) != is_up:
-            status = "🟢 Доступен" if is_up else "🔴 Недоступен"
-            await bot.send_message(user_id, f"⚠️ Изменение статуса: {url}\nНовый статус: {status}")
-            user_status[user_id][url] = is_up
-            if not is_up:
-                with open("down_log.txt", "a", encoding="utf-8") as f:
-                    f.write(f"{datetime.now()} — {url} стал недоступен\n")
+async def notify_all_users(message):
+    for user_id in subscribed_users:
+        try:
+            await bot.send_message(user_id, message)
+        except Exception:
+            pass
 
-# Фоновая задача для авто-проверки
-async def monitoring_task(user_id):
+async def monitor_sites():
     while True:
-        await notify_changes(user_id)
-        await asyncio.sleep(60)
+        sites = load_sites()
+        for site in sites:
+            is_up = await check_site(site)
+            if site not in site_status:
+                site_status[site] = is_up
+            elif site_status[site] != is_up:
+                status = "🟢 снова доступен" if is_up else "🔴 стал недоступен"
+                msg = f"⚠️ {site} {status}"
+                await notify_all_users(msg)
+                site_status[site] = is_up
+                if not is_up:
+                    with open("down_log.txt", "a", encoding="utf-8") as f:
+                        f.write(f"{datetime.now()} — {site} стал недоступен\n")
+        await asyncio.sleep(check_interval)
 
-# /start
 @dp.message_handler(commands=['start'])
-async def start_command(message: types.Message):
+async def cmd_start(message: types.Message):
     user_id = message.from_user.id
-    await message.answer("Привет! Отправь список сайтов через пробел или запятую, которые хочешь мониторить.")
-    if user_id in user_tasks and not user_tasks[user_id].done():
-        user_tasks[user_id].cancel()
-    user_sites[user_id] = []
-    user_status[user_id] = {}
+    subscribed_users.add(user_id)
+    await message.answer("✅ Вы подключены к мониторингу сайтов.", reply_markup=get_main_keyboard())
 
-# Принимаем список сайтов
-@dp.message_handler(lambda message: message.from_user.id in user_sites and not user_sites[message.from_user.id])
-async def receive_sites(message: types.Message):
-    user_id = message.from_user.id
-    text = message.text.replace(',', ' ').split()
-    user_sites[user_id] = text
-    user_status[user_id] = {}
-    await message.answer("✅ Мониторинг запущен!", reply_markup=get_main_keyboard())
-    # Инициализируем статус
-    for url in text:
-        is_up = await check_site(url)
-        user_status[user_id][url] = is_up
-    # Запуск фоновой задачи
-    task = asyncio.create_task(monitoring_task(user_id))
-    user_tasks[user_id] = task
-
-# Inline-кнопки
 @dp.callback_query_handler(lambda c: c.data in ["check_now", "status", "stop"])
 async def callback_handler(callback_query: types.CallbackQuery):
     user_id = callback_query.from_user.id
     data = callback_query.data
+    sites = load_sites()
 
     if data == "check_now":
-        await notify_changes(user_id)
-        await bot.answer_callback_query(callback_query.id, text="Проверка завершена.")
+        result = ""
+        for site in sites:
+            is_up = await check_site(site)
+            emoji = "🟢" if is_up else "🔴"
+            result += f"{emoji} {site}\n"
+        await bot.send_message(user_id, f"📥 Результат проверки:\n{result}")
+        await bot.answer_callback_query(callback_query.id)
 
     elif data == "status":
-        text = ""
-        for url in user_sites.get(user_id, []):
-            status = user_status[user_id].get(url, False)
-            emoji = "🟢" if status else "🔴"
-            text += f"{emoji} {url}\n"
-        await bot.send_message(user_id, f"📊 Текущий статус сайтов:\n{text}")
+        result = ""
+        for site in sites:
+            is_up = site_status.get(site, False)
+            emoji = "🟢" if is_up else "🔴"
+            result += f"{emoji} {site}\n"
+        await bot.send_message(user_id, f"📊 Текущий статус:\n{result}")
+        await bot.answer_callback_query(callback_query.id)
 
     elif data == "stop":
-        if user_id in user_tasks:
-            user_tasks[user_id].cancel()
-            await bot.send_message(user_id, "⛔ Авто-проверка остановлена.")
-        else:
-            await bot.send_message(user_id, "⚠️ Авто-проверка не была запущена.")
+        subscribed_users.discard(user_id)
+        await bot.send_message(user_id, "⛔ Вы отписались от уведомлений.")
+        await bot.answer_callback_query(callback_query.id)
 
-    await bot.answer_callback_query(callback_query.id)
+async def on_startup(dp):
+    asyncio.create_task(monitor_sites())
 
-# Запуск
 if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=True)
+    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
