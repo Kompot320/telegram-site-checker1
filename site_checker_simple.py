@@ -1,125 +1,113 @@
-import asyncio
-import datetime
+import logging
 import aiohttp
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler, ContextTypes
-)
-import os
+import asyncio
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.utils import executor
+from datetime import datetime
 
-API_TOKEN = '8158547630:AAHXDP-vH6Y2T6IU3Du__n3MjA55ETZ30Kg'
+API_TOKEN = '8158547630:AAHXDP-vH6Y2T6IU3Du__n3MjA55ETZ30Kg'  # ← Вставьте сюда токен вашего бота
 
-CHECK_INTERVAL = 3600  # интервал в секундах (60 минут)
+bot = Bot(token=API_TOKEN)
+dp = Dispatcher(bot)
 
-user_statuses = {}  # {user_id: {url: bool}}
+# Храним сайты и статусы по пользователям
+user_sites = {}
+user_status = {}
+user_tasks = {}
 
-SITES_FILE = 'сайт/sites_list.txt'
+# Логгер
+logging.basicConfig(level=logging.INFO)
 
+# Кнопки управления
+def get_main_keyboard():
+    buttons = [
+        InlineKeyboardButton("🔄 Проверить сейчас", callback_data="check_now"),
+        InlineKeyboardButton("📊 Статус сайтов", callback_data="status"),
+        InlineKeyboardButton("⛔ Остановить авто-проверку", callback_data="stop")
+    ]
+    return InlineKeyboardMarkup(row_width=1).add(*buttons)
 
-def log_status_change(user_id, url, is_up):
-    status = "UP" if is_up else "DOWN"
-    time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open("down_log.txt", "a") as log_file:
-        log_file.write(f"{time_str} | User {user_id} | {url} is {status}\n")
-
-
-def load_sites():
-    if not os.path.exists(SITES_FILE):
-        return []
-    with open(SITES_FILE, 'r') as f:
-        return [line.strip() for line in f if line.strip()]
-
-
+# Проверка сайта
 async def check_site(url):
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=10) as resp:
-                return resp.status < 400
-    except:
+            async with session.get(url, timeout=10) as response:
+                return response.status == 200
+    except Exception:
         return False
 
+# Отправка уведомления при изменении статуса
+async def notify_changes(user_id):
+    for url in user_sites[user_id]:
+        is_up = await check_site(url)
+        if user_status[user_id].get(url) != is_up:
+            status = "🟢 Доступен" if is_up else "🔴 Недоступен"
+            await bot.send_message(user_id, f"⚠️ Изменение статуса: {url}\nНовый статус: {status}")
+            user_status[user_id][url] = is_up
+            if not is_up:
+                with open("down_log.txt", "a", encoding="utf-8") as f:
+                    f.write(f"{datetime.now()} — {url} стал недоступен\n")
 
-async def send_site_status(user_id, bot, url, is_up):
-    msg = f"✅ Сайт снова доступен: {url}" if is_up else f"⛔ Сайт недоступен: {url}"
-    await bot.send_message(chat_id=user_id, text=msg)
-
-
-async def check_all_users(bot):
+# Фоновая задача для авто-проверки
+async def monitoring_task(user_id):
     while True:
-        sites = load_sites()
-        for user_id in user_statuses:
-            for url in sites:
-                is_up = await check_site(url)
-                last_status = user_statuses[user_id].get(url)
+        await notify_changes(user_id)
+        await asyncio.sleep(60)
 
-                if last_status is None:
-                    user_statuses[user_id][url] = is_up
-                elif last_status != is_up:
-                    user_statuses[user_id][url] = is_up
-                    log_status_change(user_id, url, is_up)
-                    await send_site_status(user_id, bot, url, is_up)
-        await asyncio.sleep(CHECK_INTERVAL)
+# /start
+@dp.message_handler(commands=['start'])
+async def start_command(message: types.Message):
+    user_id = message.from_user.id
+    await message.answer("Привет! Отправь список сайтов через пробел или запятую, которые хочешь мониторить.")
+    if user_id in user_tasks and not user_tasks[user_id].done():
+        user_tasks[user_id].cancel()
+    user_sites[user_id] = []
+    user_status[user_id] = {}
 
+# Принимаем список сайтов
+@dp.message_handler(lambda message: message.from_user.id in user_sites and not user_sites[message.from_user.id])
+async def receive_sites(message: types.Message):
+    user_id = message.from_user.id
+    text = message.text.replace(',', ' ').split()
+    user_sites[user_id] = text
+    user_status[user_id] = {}
+    await message.answer("✅ Мониторинг запущен!", reply_markup=get_main_keyboard())
+    # Инициализируем статус
+    for url in text:
+        is_up = await check_site(url)
+        user_status[user_id][url] = is_up
+    # Запуск фоновой задачи
+    task = asyncio.create_task(monitoring_task(user_id))
+    user_tasks[user_id] = task
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    sites = load_sites()
-    if not sites:
-        await update.message.reply_text("⚠️ Не удалось загрузить сайты из файла.")
-        return
+# Inline-кнопки
+@dp.callback_query_handler(lambda c: c.data in ["check_now", "status", "stop"])
+async def callback_handler(callback_query: types.CallbackQuery):
+    user_id = callback_query.from_user.id
+    data = callback_query.data
 
-    if user_id not in user_statuses:
-        user_statuses[user_id] = {}
+    if data == "check_now":
+        await notify_changes(user_id)
+        await bot.answer_callback_query(callback_query.id, text="Проверка завершена.")
 
-    buttons = [
-        [InlineKeyboardButton("🔄 Проверить сейчас", callback_data='check_now')],
-        [InlineKeyboardButton("📊 Статус сайтов", callback_data='status')],
-        [InlineKeyboardButton("⛔ Остановить авто-проверку", callback_data='stop')]
-    ]
-    markup = InlineKeyboardMarkup(buttons)
-    await update.message.reply_text("🚀 Мониторинг запущен!", reply_markup=markup)
+    elif data == "status":
+        text = ""
+        for url in user_sites.get(user_id, []):
+            status = user_status[user_id].get(url, False)
+            emoji = "🟢" if status else "🔴"
+            text += f"{emoji} {url}\n"
+        await bot.send_message(user_id, f"📊 Текущий статус сайтов:\n{text}")
 
+    elif data == "stop":
+        if user_id in user_tasks:
+            user_tasks[user_id].cancel()
+            await bot.send_message(user_id, "⛔ Авто-проверка остановлена.")
+        else:
+            await bot.send_message(user_id, "⚠️ Авто-проверка не была запущена.")
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
+    await bot.answer_callback_query(callback_query.id)
 
-    sites = load_sites()
-    if user_id not in user_statuses:
-        await query.edit_message_text("Сначала запустите /start")
-        return
-
-    if query.data == 'check_now':
-        messages = []
-        for url in sites:
-            is_up = await check_site(url)
-            user_statuses[user_id][url] = is_up
-            messages.append(f"{url} — {'✅ Доступен' if is_up else '⛔ Недоступен'}")
-        await query.edit_message_text("Результат:\n" + '\n'.join(messages))
-
-    elif query.data == 'status':
-        messages = []
-        for url in sites:
-            status = user_statuses[user_id].get(url)
-            status_str = "❓ Неизвестно" if status is None else ("✅ Доступен" if status else "⛔ Недоступен")
-            messages.append(f"{url} — {status_str}")
-        await query.edit_message_text("Статус сайтов:\n" + '\n'.join(messages))
-
-    elif query.data == 'stop':
-        user_statuses[user_id] = {}
-        await query.edit_message_text("⛔ Мониторинг остановлен. Введите /start для запуска.")
-
-
-async def main():
-    app = Application.builder().token(API_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button_handler))
-
-    asyncio.create_task(check_all_users(app.bot))
-    print("Бот запущен.")
-    await app.run_polling()
-
-
+# Запуск
 if __name__ == '__main__':
-    asyncio.run(main())
+    executor.start_polling(dp, skip_updates=True)
