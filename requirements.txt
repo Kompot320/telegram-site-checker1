@@ -2,3 +2,5 @@ python-telegram-bot==20.7
 aiogram==2.25.1
 requests
 nest_asyncio
+aiogram>=2.25
+aiohttp>=3.8
