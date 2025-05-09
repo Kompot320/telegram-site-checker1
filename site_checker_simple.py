@@ -4,26 +4,13 @@ import asyncio
 import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from aiogram.dispatcher.webhook import get_new_configured_app
-from aiogram.contrib.middlewares.logging import LoggingMiddleware
-from aiogram.utils.executor import start_webhook
-from fastapi import FastAPI, Request
-from aiogram.dispatcher.webhook import WebhookRequestHandler
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram.utils.executor import start_polling
 from datetime import datetime
+from aiohttp import web  # 🔹 добавили aiohttp сервер
 
 API_TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_HOST = os.getenv("RENDER_EXTERNAL_URL")  # Render automatically sets this
-WEBHOOK_PATH = "/webhook"
-WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
-
-WEBAPP_HOST = "0.0.0.0"
-WEBAPP_PORT = int(os.getenv("PORT", 10000))
-
-bot = Bot(token=API_TOKEN)
-storage = MemoryStorage()
-dp = Dispatcher(bot, storage=storage)
-dp.middleware.setup(LoggingMiddleware())
+bot = Bot(API_TOKEN)
+dp = Dispatcher(bot)
 
 subscribed_users = set()
 site_status = {}
@@ -57,7 +44,7 @@ async def check_site(url):
 async def notify_all_users(message):
     for user_id in subscribed_users:
         try:
-            await bot.send_message(user_id, message, reply_markup=get_main_keyboard())
+            await bot.send_message(user_id, message)
         except Exception:
             pass
 
@@ -96,7 +83,7 @@ async def callback_handler(callback_query: types.CallbackQuery):
             is_up = await check_site(site)
             emoji = "🟢" if is_up else "🔴"
             result += f"{emoji} {site}\n"
-        await bot.send_message(user_id, f"📥 Результат проверки:\n{result}", reply_markup=get_main_keyboard())
+        await bot.send_message(user_id, f"📥 Результат проверки:\n{result}")
         await bot.answer_callback_query(callback_query.id)
 
     elif data == "status":
@@ -105,7 +92,7 @@ async def callback_handler(callback_query: types.CallbackQuery):
             is_up = site_status.get(site, False)
             emoji = "🟢" if is_up else "🔴"
             result += f"{emoji} {site}\n"
-        await bot.send_message(user_id, f"📊 Текущий статус:\n{result}", reply_markup=get_main_keyboard())
+        await bot.send_message(user_id, f"📊 Текущий статус:\n{result}")
         await bot.answer_callback_query(callback_query.id)
 
     elif data == "stop":
@@ -113,27 +100,28 @@ async def callback_handler(callback_query: types.CallbackQuery):
         await bot.send_message(user_id, "⛔ Вы отписались от уведомлений.")
         await bot.answer_callback_query(callback_query.id)
 
-# FastAPI app
-app = FastAPI()
+# 🔹 HTTP-сервер для Render
+async def render_healthcheck(request):
+    return web.Response(text="Bot is running")
 
-@app.on_event("startup")
-async def on_startup():
-    await bot.set_webhook(WEBHOOK_URL)
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", render_healthcheck)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 10000)))
+    await site.start()
+    print(f"==> Web server started on port {os.environ.get('PORT', 10000)}")
+
+# 🔹 Объединяем запуск бота и сервера
+async def main():
+    await start_web_server()
     asyncio.create_task(monitor_sites())
-    logging.info("Webhook set and monitoring started.")
+    await dp.start_polling()
 
-@app.on_event("shutdown")
-async def on_shutdown():
-    await bot.delete_webhook()
-    await dp.storage.close()
-    await dp.storage.wait_closed()
+if __name__ == '__main__':
+    asyncio.run(main())
 
-@app.post(WEBHOOK_PATH)
-async def telegram_webhook(request: Request):
-    update = await request.json()
-    telegram_update = types.Update.to_object(update)
-    await dp.process_update(telegram_update)
-    return {"ok": True}
 
 
 
