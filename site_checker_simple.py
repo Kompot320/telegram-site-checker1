@@ -3,10 +3,9 @@ import aiohttp
 import asyncio
 import os
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from aiogram.utils.executor import start_polling
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from aiogram.utils import executor
 from datetime import datetime
-from aiohttp import web  # 🔹 добавили aiohttp сервер
 
 API_TOKEN = os.getenv("BOT_TOKEN")
 bot = Bot(API_TOKEN)
@@ -19,13 +18,15 @@ check_interval = 60  # секунд
 
 logging.basicConfig(level=logging.INFO)
 
+# ✅ Новая удобная клавиатура
 def get_main_keyboard():
     buttons = [
-        InlineKeyboardButton("🔄 Проверить сейчас", callback_data="check_now"),
-        InlineKeyboardButton("📊 Статус сайтов", callback_data="status"),
-        InlineKeyboardButton("⛔ Остановить авто-проверку", callback_data="stop")
+        [KeyboardButton("🔄 Проверить сейчас")],
+        [KeyboardButton("📊 Статус сайтов")],
+        [KeyboardButton("⛔ Остановить авто-проверку")],
+        [KeyboardButton("❌ Скрыть меню")]
     ]
-    return InlineKeyboardMarkup(row_width=1).add(*buttons)
+    return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
 def load_sites():
     if not os.path.exists(site_list_file):
@@ -71,54 +72,39 @@ async def cmd_start(message: types.Message):
     subscribed_users.add(user_id)
     await message.answer("✅ Вы подключены к мониторингу сайтов.", reply_markup=get_main_keyboard())
 
-@dp.callback_query_handler(lambda c: c.data in ["check_now", "status", "stop"])
-async def callback_handler(callback_query: types.CallbackQuery):
-    user_id = callback_query.from_user.id
-    data = callback_query.data
+@dp.message_handler(lambda message: message.text in [
+    "🔄 Проверить сейчас", "📊 Статус сайтов", "⛔ Остановить авто-проверку", "❌ Скрыть меню"])
+async def handle_main_menu(message: types.Message):
+    user_id = message.from_user.id
+    text = message.text
     sites = load_sites()
 
-    if data == "check_now":
+    if text == "🔄 Проверить сейчас":
         result = ""
         for site in sites:
             is_up = await check_site(site)
             emoji = "🟢" if is_up else "🔴"
             result += f"{emoji} {site}\n"
-        await bot.send_message(user_id, f"📥 Результат проверки:\n{result}")
-        await bot.answer_callback_query(callback_query.id)
+        await message.answer(f"📥 Результат проверки:\n{result}")
 
-    elif data == "status":
+    elif text == "📊 Статус сайтов":
         result = ""
         for site in sites:
             is_up = site_status.get(site, False)
             emoji = "🟢" if is_up else "🔴"
             result += f"{emoji} {site}\n"
-        await bot.send_message(user_id, f"📊 Текущий статус:\n{result}")
-        await bot.answer_callback_query(callback_query.id)
+        await message.answer(f"📊 Текущий статус:\n{result}")
 
-    elif data == "stop":
+    elif text == "⛔ Остановить авто-проверку":
         subscribed_users.discard(user_id)
-        await bot.send_message(user_id, "⛔ Вы отписались от уведомлений.")
-        await bot.answer_callback_query(callback_query.id)
+        await message.answer("⛔ Вы отписались от уведомлений.")
 
-# 🔹 HTTP-сервер для Render
-async def render_healthcheck(request):
-    return web.Response(text="Bot is running")
+    elif text == "❌ Скрыть меню":
+        await message.answer("Клавиатура скрыта.", reply_markup=ReplyKeyboardRemove())
 
-async def start_web_server():
-    app = web.Application()
-    app.router.add_get("/", render_healthcheck)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 10000)))
-    await site.start()
-    print(f"==> Web server started on port {os.environ.get('PORT', 10000)}")
-
-# 🔹 Объединяем запуск бота и сервера
-async def main():
-    await start_web_server()
+async def on_startup(dp):
     asyncio.create_task(monitor_sites())
-    await dp.start_polling()
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
 
