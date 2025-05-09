@@ -1,24 +1,24 @@
 import logging
-import aiohttp
-import asyncio
 import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
-from aiogram.utils import executor
+from aiohttp import web
+import aiohttp
+import asyncio
 from datetime import datetime
 
-API_TOKEN = os.getenv("BOT_TOKEN")
-bot = Bot(API_TOKEN)
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+bot = Bot(BOT_TOKEN)
 dp = Dispatcher(bot)
 
 subscribed_users = set()
 site_status = {}
 site_list_file = "sites_list.txt"
-check_interval = 60  # секунд
+check_interval = 60
 
 logging.basicConfig(level=logging.INFO)
 
-# ✅ Новая удобная клавиатура
 def get_main_keyboard():
     buttons = [
         [KeyboardButton("🔄 Проверить сейчас")],
@@ -102,9 +102,29 @@ async def handle_main_menu(message: types.Message):
     elif text == "❌ Скрыть меню":
         await message.answer("Клавиатура скрыта.", reply_markup=ReplyKeyboardRemove())
 
-async def on_startup(dp):
+# =======================
+# Webhook routes
+# =======================
+
+async def on_startup(app):
+    await bot.set_webhook(WEBHOOK_URL)
     asyncio.create_task(monitor_sites())
 
+async def on_shutdown(app):
+    await bot.delete_webhook()
+
+async def handle_webhook(request):
+    data = await request.json()
+    update = types.Update.to_object(data)
+    await dp.process_update(update)
+    return web.Response()
+
+app = web.Application()
+app.router.add_post('/webhook', handle_webhook)
+app.on_startup.append(on_startup)
+app.on_shutdown.append(on_shutdown)
+
 if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+    web.run_app(app, port=int(os.environ.get("PORT", 10000)))
+
 
