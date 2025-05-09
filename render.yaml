@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: telegram-site-checker1
+    name: site-monitor-bot
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: python site_checker_simple.py
