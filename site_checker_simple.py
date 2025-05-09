@@ -1,32 +1,30 @@
 import logging
-import os
-from aiogram import Bot, Dispatcher, types
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
-from aiohttp import web
 import aiohttp
 import asyncio
+import os
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.utils import executor
 from datetime import datetime
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-bot = Bot(BOT_TOKEN)
+API_TOKEN = os.getenv("BOT_TOKEN")
+bot = Bot(API_TOKEN)
 dp = Dispatcher(bot)
 
 subscribed_users = set()
 site_status = {}
 site_list_file = "sites_list.txt"
-check_interval = 60
+check_interval = 60  # секунд
 
 logging.basicConfig(level=logging.INFO)
 
 def get_main_keyboard():
     buttons = [
-        [KeyboardButton("🔄 Проверить сейчас")],
-        [KeyboardButton("📊 Статус сайтов")],
-        [KeyboardButton("⛔ Остановить авто-проверку")],
-        [KeyboardButton("❌ Скрыть меню")]
+        InlineKeyboardButton("🔄 Проверить сейчас", callback_data="check_now"),
+        InlineKeyboardButton("📊 Статус сайтов", callback_data="status"),
+        InlineKeyboardButton("⛔ Остановить авто-проверку", callback_data="stop")
     ]
-    return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
+    return InlineKeyboardMarkup(row_width=1).add(*buttons)
 
 def load_sites():
     if not os.path.exists(site_list_file):
@@ -45,7 +43,7 @@ async def check_site(url):
 async def notify_all_users(message):
     for user_id in subscribed_users:
         try:
-            await bot.send_message(user_id, message)
+            await bot.send_message(user_id, message, reply_markup=get_main_keyboard())
         except Exception:
             pass
 
@@ -66,65 +64,45 @@ async def monitor_sites():
                         f.write(f"{datetime.now()} — {site} стал недоступен\n")
         await asyncio.sleep(check_interval)
 
-@dp.message_handler(commands=['start'])
-async def cmd_start(message: types.Message):
+@dp.message_handler(commands=['start', 'menu'])
+async def show_main_menu(message: types.Message):
     user_id = message.from_user.id
     subscribed_users.add(user_id)
-    await message.answer("✅ Вы подключены к мониторингу сайтов.", reply_markup=get_main_keyboard())
+    await message.answer("📋 Главное меню. Выберите действие:", reply_markup=get_main_keyboard())
 
-@dp.message_handler(lambda message: message.text in [
-    "🔄 Проверить сейчас", "📊 Статус сайтов", "⛔ Остановить авто-проверку", "❌ Скрыть меню"])
-async def handle_main_menu(message: types.Message):
-    user_id = message.from_user.id
-    text = message.text
+@dp.callback_query_handler(lambda c: c.data in ["check_now", "status", "stop"])
+async def callback_handler(callback_query: types.CallbackQuery):
+    user_id = callback_query.from_user.id
+    data = callback_query.data
     sites = load_sites()
 
-    if text == "🔄 Проверить сейчас":
+    if data == "check_now":
         result = ""
         for site in sites:
             is_up = await check_site(site)
             emoji = "🟢" if is_up else "🔴"
             result += f"{emoji} {site}\n"
-        await message.answer(f"📥 Результат проверки:\n{result}")
+        await bot.send_message(user_id, f"📥 Результат проверки:\n{result}", reply_markup=get_main_keyboard())
+        await bot.answer_callback_query(callback_query.id)
 
-    elif text == "📊 Статус сайтов":
+    elif data == "status":
         result = ""
         for site in sites:
             is_up = site_status.get(site, False)
             emoji = "🟢" if is_up else "🔴"
             result += f"{emoji} {site}\n"
-        await message.answer(f"📊 Текущий статус:\n{result}")
+        await bot.send_message(user_id, f"📊 Текущий статус:\n{result}", reply_markup=get_main_keyboard())
+        await bot.answer_callback_query(callback_query.id)
 
-    elif text == "⛔ Остановить авто-проверку":
+    elif data == "stop":
         subscribed_users.discard(user_id)
-        await message.answer("⛔ Вы отписались от уведомлений.")
+        await bot.send_message(user_id, "⛔ Вы отписались от уведомлений.", reply_markup=get_main_keyboard())
+        await bot.answer_callback_query(callback_query.id)
 
-    elif text == "❌ Скрыть меню":
-        await message.answer("Клавиатура скрыта.", reply_markup=ReplyKeyboardRemove())
-
-# =======================
-# Webhook routes
-# =======================
-
-async def on_startup(app):
-    await bot.set_webhook(WEBHOOK_URL)
+async def on_startup(dp):
     asyncio.create_task(monitor_sites())
 
-async def on_shutdown(app):
-    await bot.delete_webhook()
-
-async def handle_webhook(request):
-    data = await request.json()
-    update = types.Update.to_object(data)
-    await dp.process_update(update)
-    return web.Response()
-
-app = web.Application()
-app.router.add_post('/webhook', handle_webhook)
-app.on_startup.append(on_startup)
-app.on_shutdown.append(on_shutdown)
-
 if __name__ == '__main__':
-    web.run_app(app, port=int(os.environ.get("PORT", 10000)))
+    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
 
 
