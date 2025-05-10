@@ -6,7 +6,7 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.executor import start_polling
 from datetime import datetime
-from aiohttp import web  # 🔹 добавили aiohttp сервер
+from aiohttp import web
 
 API_TOKEN = os.getenv("BOT_TOKEN")
 bot = Bot(API_TOKEN)
@@ -44,7 +44,7 @@ async def check_site(url):
 async def notify_all_users(message):
     for user_id in subscribed_users:
         try:
-            await bot.send_message(user_id, message)
+            await bot.send_message(user_id, message, reply_markup=get_main_keyboard())
         except Exception:
             pass
 
@@ -83,7 +83,7 @@ async def callback_handler(callback_query: types.CallbackQuery):
             is_up = await check_site(site)
             emoji = "🟢" if is_up else "🔴"
             result += f"{emoji} {site}\n"
-        await bot.send_message(user_id, f"📥 Результат проверки:\n{result}")
+        await bot.send_message(user_id, f"📥 Результат проверки:\n{result}", reply_markup=get_main_keyboard())
         await bot.answer_callback_query(callback_query.id)
 
     elif data == "status":
@@ -92,15 +92,15 @@ async def callback_handler(callback_query: types.CallbackQuery):
             is_up = site_status.get(site, False)
             emoji = "🟢" if is_up else "🔴"
             result += f"{emoji} {site}\n"
-        await bot.send_message(user_id, f"📊 Текущий статус:\n{result}")
+        await bot.send_message(user_id, f"📊 Текущий статус:\n{result}", reply_markup=get_main_keyboard())
         await bot.answer_callback_query(callback_query.id)
 
     elif data == "stop":
         subscribed_users.discard(user_id)
-        await bot.send_message(user_id, "⛔ Вы отписались от уведомлений.")
+        await bot.send_message(user_id, "⛔ Вы отписались от уведомлений.", reply_markup=get_main_keyboard())
         await bot.answer_callback_query(callback_query.id)
 
-# 🔹 HTTP-сервер для Render
+# HTTP-сервер для Render
 async def render_healthcheck(request):
     return web.Response(text="Bot is running")
 
@@ -113,7 +113,7 @@ async def start_web_server():
     await site.start()
     print(f"==> Web server started on port {os.environ.get('PORT', 10000)}")
 
-# 🔹 Объединяем запуск бота и сервера
+# Главная точка входа
 async def main():
     await start_web_server()
     asyncio.create_task(monitor_sites())
@@ -121,7 +121,3 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
-
-
-
-
