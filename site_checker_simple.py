@@ -4,26 +4,30 @@ import asyncio
 import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.dispatcher.webhook import get_new_configured_app
 from aiohttp import web
 from datetime import datetime
 
+# === CONFIG ===
 API_TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")  # например: https://telegram-site-checker1.onrender.com
 WEBHOOK_PATH = "/webhook"
-WEBHOOK_URL = f"{os.getenv('RENDER_EXTERNAL_URL')}{WEBHOOK_PATH}"
+WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
+PORT = int(os.getenv("PORT", 10000))
 
-bot = Bot(API_TOKEN)
+bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
 subscribed_users = set()
 site_status = {}
 site_list_file = "sites_list.txt"
 check_interval = 60  # секунд
+session: aiohttp.ClientSession | None = None  # глобальная сессия aiohttp
 
 logging.basicConfig(level=logging.INFO)
 
 
-# ==== Интерфейс ====
-
+# === UI ===
 def get_main_keyboard():
     buttons = [
         InlineKeyboardButton("🔄 Проверить сейчас", callback_data="check_now"),
@@ -33,8 +37,7 @@ def get_main_keyboard():
     return InlineKeyboardMarkup(row_width=1).add(*buttons)
 
 
-# ==== Работа с сайтами ====
-
+# === Логика ===
 def load_sites():
     if not os.path.exists(site_list_file):
         return []
@@ -44,9 +47,8 @@ def load_sites():
 
 async def check_site(url):
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=10) as response:
-                return response.status == 200
+        async with session.get(url, timeout=10) as response:
+            return response.status == 200
     except Exception:
         return False
 
@@ -77,8 +79,7 @@ async def monitor_sites():
         await asyncio.sleep(check_interval)
 
 
-# ==== Хендлеры ====
-
+# === Хендлеры ===
 @dp.message_handler(commands=['start'])
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
@@ -115,44 +116,40 @@ async def callback_handler(callback_query: types.CallbackQuery):
     await bot.answer_callback_query(callback_query.id)
 
 
-# ==== Webhook ====
+# === Webhook-сервер ===
+async def on_startup(app):
+    global session
+    session = aiohttp.ClientSession()
+    await bot.set_webhook(WEBHOOK_URL)
+    asyncio.create_task(monitor_sites())
+    print(f"✅ Webhook установлен: {WEBHOOK_URL}")
 
-async def handle_webhook(request):
-    data = await request.json()
-    update = types.Update(**data)
+
+async def on_shutdown(app):
+    global session
+    if session:
+        await session.close()
+    await bot.delete_webhook()
+    print("❌ Webhook удалён и сессия aiohttp закрыта")
+
+
+async def handle(request):
+    request_body_dict = await request.json()
+    update = types.Update.to_object(request_body_dict)
     await dp.process_update(update)
     return web.Response()
 
-async def render_healthcheck(request):
-    return web.Response(text="Bot is running")
 
-async def on_startup(app):
-    await bot.set_webhook(WEBHOOK_URL)
-    print(f"✅ Webhook установлен: {WEBHOOK_URL}")
-    asyncio.create_task(monitor_sites())
-
-async def on_shutdown(app):
-    await bot.delete_webhook()
-    print("❌ Webhook удалён")
-
-
-# ==== Запуск сервера ====
-
-async def start_web_server():
+def create_app():
     app = web.Application()
-    app.router.add_post(WEBHOOK_PATH, handle_webhook)
-    app.router.add_get("/", render_healthcheck)
+    app.router.add_post(WEBHOOK_PATH, handle)
+    app.router.add_get("/", lambda request: web.Response(text="Bot is running"))
     app.on_startup.append(on_startup)
     app.on_shutdown.append(on_shutdown)
-
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 10000)))
-    await site.start()
-    print(f"🌐 Web-сервер запущен на порту {os.environ.get('PORT', 10000)}")
+    return app
 
 
-# ==== main ====
-
-if __name__ == '__main__':
-    asyncio.run(start_web_server())
+# === Запуск ===
+if __name__ == "__main__":
+    app = create_app()
+    web.run_app(app, host="0.0.0.0", port=PORT)
