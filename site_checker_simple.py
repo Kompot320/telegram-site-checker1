@@ -4,11 +4,13 @@ import asyncio
 import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from aiogram.utils.executor import start_polling
-from datetime import datetime
 from aiohttp import web
+from datetime import datetime
 
 API_TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_PATH = "/webhook"
+WEBHOOK_URL = f"{os.getenv('RENDER_EXTERNAL_URL')}{WEBHOOK_PATH}"
+
 bot = Bot(API_TOKEN)
 dp = Dispatcher(bot)
 
@@ -19,6 +21,9 @@ check_interval = 60  # секунд
 
 logging.basicConfig(level=logging.INFO)
 
+
+# ==== Интерфейс ====
+
 def get_main_keyboard():
     buttons = [
         InlineKeyboardButton("🔄 Проверить сейчас", callback_data="check_now"),
@@ -27,11 +32,15 @@ def get_main_keyboard():
     ]
     return InlineKeyboardMarkup(row_width=1).add(*buttons)
 
+
+# ==== Работа с сайтами ====
+
 def load_sites():
     if not os.path.exists(site_list_file):
         return []
     with open(site_list_file, "r", encoding="utf-8") as f:
         return [line.strip() for line in f if line.strip()]
+
 
 async def check_site(url):
     try:
@@ -41,12 +50,14 @@ async def check_site(url):
     except Exception:
         return False
 
+
 async def notify_all_users(message):
     for user_id in subscribed_users:
         try:
             await bot.send_message(user_id, message, reply_markup=get_main_keyboard())
         except Exception:
             pass
+
 
 async def monitor_sites():
     while True:
@@ -65,22 +76,15 @@ async def monitor_sites():
                         f.write(f"{datetime.now()} — {site} стал недоступен\n")
         await asyncio.sleep(check_interval)
 
+
+# ==== Хендлеры ====
+
 @dp.message_handler(commands=['start'])
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
     subscribed_users.add(user_id)
-    sent = await message.answer("✅ Вы подключены к мониторингу сайтов.", reply_markup=get_main_keyboard())
+    await message.answer("✅ Вы подключены к мониторингу сайтов.", reply_markup=get_main_keyboard())
 
-    # Пытаемся закрепить сообщение (если это не личка)
-    if message.chat.type != "private":
-        try:
-            await bot.pin_chat_message(
-                chat_id=message.chat.id,
-                message_id=sent.message_id,
-                disable_notification=True
-            )
-        except Exception as e:
-            logging.warning(f"Не удалось закрепить сообщение: {e}")
 
 @dp.callback_query_handler(lambda c: c.data in ["check_now", "status", "stop"])
 async def callback_handler(callback_query: types.CallbackQuery):
@@ -95,7 +99,6 @@ async def callback_handler(callback_query: types.CallbackQuery):
             emoji = "🟢" if is_up else "🔴"
             result += f"{emoji} {site}\n"
         await bot.send_message(user_id, f"📥 Результат проверки:\n{result}", reply_markup=get_main_keyboard())
-        await bot.answer_callback_query(callback_query.id)
 
     elif data == "status":
         result = ""
@@ -104,31 +107,52 @@ async def callback_handler(callback_query: types.CallbackQuery):
             emoji = "🟢" if is_up else "🔴"
             result += f"{emoji} {site}\n"
         await bot.send_message(user_id, f"📊 Текущий статус:\n{result}", reply_markup=get_main_keyboard())
-        await bot.answer_callback_query(callback_query.id)
 
     elif data == "stop":
         subscribed_users.discard(user_id)
         await bot.send_message(user_id, "⛔ Вы отписались от уведомлений.", reply_markup=get_main_keyboard())
-        await bot.answer_callback_query(callback_query.id)
 
-# HTTP-сервер для Render
+    await bot.answer_callback_query(callback_query.id)
+
+
+# ==== Webhook ====
+
+async def handle_webhook(request):
+    data = await request.json()
+    update = types.Update(**data)
+    await dp.process_update(update)
+    return web.Response()
+
 async def render_healthcheck(request):
     return web.Response(text="Bot is running")
 
+async def on_startup(app):
+    await bot.set_webhook(WEBHOOK_URL)
+    print(f"✅ Webhook установлен: {WEBHOOK_URL}")
+    asyncio.create_task(monitor_sites())
+
+async def on_shutdown(app):
+    await bot.delete_webhook()
+    print("❌ Webhook удалён")
+
+
+# ==== Запуск сервера ====
+
 async def start_web_server():
     app = web.Application()
+    app.router.add_post(WEBHOOK_PATH, handle_webhook)
     app.router.add_get("/", render_healthcheck)
+    app.on_startup.append(on_startup)
+    app.on_shutdown.append(on_shutdown)
+
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 10000)))
     await site.start()
-    print(f"==> Web server started on port {os.environ.get('PORT', 10000)}")
+    print(f"🌐 Web-сервер запущен на порту {os.environ.get('PORT', 10000)}")
 
-# Главная точка входа
-async def main():
-    await start_web_server()
-    asyncio.create_task(monitor_sites())
-    await dp.start_polling()
+
+# ==== main ====
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    asyncio.run(start_web_server())
