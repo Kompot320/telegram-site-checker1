@@ -69,7 +69,18 @@ async def monitor_sites():
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
     subscribed_users.add(user_id)
-    await message.answer("✅ Вы подключены к мониторингу сайтов.", reply_markup=get_main_keyboard())
+    sent = await message.answer("✅ Вы подключены к мониторингу сайтов.", reply_markup=get_main_keyboard())
+
+    # Пытаемся закрепить сообщение (если это не личка)
+    if message.chat.type != "private":
+        try:
+            await bot.pin_chat_message(
+                chat_id=message.chat.id,
+                message_id=sent.message_id,
+                disable_notification=True
+            )
+        except Exception as e:
+            logging.warning(f"Не удалось закрепить сообщение: {e}")
 
 @dp.callback_query_handler(lambda c: c.data in ["check_now", "status", "stop"])
 async def callback_handler(callback_query: types.CallbackQuery):
