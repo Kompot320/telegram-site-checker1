@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 API_TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = os.getenv("https://telegram-site-checker1.onrender.com")
+WEBHOOK_URL = os.getenv("https://telegram-site-checker1.onrender.com/webhook")
 PORT = int(os.getenv("PORT", 10000))
 
 bot = Bot(API_TOKEN)
